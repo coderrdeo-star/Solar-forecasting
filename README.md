@@ -115,7 +115,7 @@ Edit `.env` to configure your location coordinates and panel rating:
 LATITUDE=13.0827
 LONGITUDE=80.2707
 LOCATION_NAME=Chennai, India
-PANEL_RATED_WATTS=10.0
+PANEL_RATED_WATTS=5.0
 HOST=0.0.0.0
 PORT=5000
 FLASK_DEBUG=false
@@ -186,48 +186,89 @@ print(res.status_code, res.json())
 
 ## Hardware Setup & ESP32 Configuration
 
-### Required Hardware
-- 1× ESP32 NodeMCU / DevKit board
-- 1× Adafruit INA219 High-Side I2C DC Current & Voltage Sensor
-- 1× DS18B20 Waterproof 1-Wire Digital Temperature Sensor
-- 1× 4.7 kΩ Resistor (Pull-up for OneWire)
-- 1× Small Educational Solar Panel (Rated ≤ 10 W, Voc ≤ 21 V)
-- 1× DC Load resistor or USB power bank load
+### Exact Bill of Materials
+| No. | Exact Component Name | Qty | Role in SolarChip |
+| :--- | :--- | :---: | :--- |
+| 1 | **6V, 5W Mini Solar Panel** | 1 | Power generation source |
+| 2 | **ESP32 DevKit V1 (ESP32-WROOM-32)** | 1 | Microcontroller, Wi-Fi telemetry & node controller |
+| 3 | **INA219 Voltage & Current Sensor Module** | 1 | High-side bus voltage & current measurement (I2C) |
+| 4 | **DS18B20 Waterproof Temperature Sensor** | 1 | Measures solar panel surface temperature (1-Wire) |
+| 5 | **DHT22 / AM2302 Sensor Module** | 1 | Measures ambient air temperature & humidity |
+| 6 | **0.96-inch I2C OLED Display (SSD1306, 128×64)** | 1 | Real-time on-device status, power & IP display |
+| 7 | **Breadboard** | 1 | Solderless prototyping circuit assembly |
+| 8 | **Jumper Wire Kit** | 1 | Circuit interconnects (M-M, M-F, F-F) |
+| 9 | **4.7kΩ Resistor** | 1 | Required pull-up resistor for DS18B20 data line |
+| 10 | **6V, 3W DC Lamp (Testing Load)** | 1 | Draws active current to evaluate real power output |
+| — | **Micro-USB Data Cable** | 1 | Flashing firmware & serial power |
 
-### Wiring Diagram
-| Sensor | Sensor Pin | ESP32 GPIO | Notes |
+---
+
+### Complete Breadboard Wiring Guide
+
+```
+                        +----------------------------+
+                        |  6V, 5W Solar Panel (+)    |
+                        +--------------+-------------+
+                                       |
+                                       v
+                                [ INA219 VIN+ ]
+                                [ INA219 VIN- ] --------+
+                                                        |
+                        +----------------------------+  |
+                        |   6V, 3W DC Lamp (Load)    |<-+
+                        +--------------+-------------+
+                                       |
++--------------------------------------+--------------------------------------+
+|                               COMMON GROUND (GND)                           |
++-----------------------------------------------------------------------------+
+```
+
+#### Sensor Pinout & ESP32 Connections
+| Component | Component Pin | Connects To | Description |
 | :--- | :--- | :--- | :--- |
-| **INA219** | VCC | 3.3V or 5V | Depends on breakout board |
-| **INA219** | GND | GND | Common ground with panel |
-| **INA219** | SDA | GPIO 21 | Hardware I2C Data |
-| **INA219** | SCL | GPIO 22 | Hardware I2C Clock |
-| **INA219** | VIN+ | Solar Panel (+) | Input from panel positive |
-| **INA219** | VIN- | Load Positive (+) | Output to load circuit |
-| **DS18B20** | VDD (Red) | 3.3V | Power supply |
-| **DS18B20** | GND (Black)| GND | Common ground |
-| **DS18B20** | Data (Yellow)| GPIO 4 | **Must have 4.7kΩ pull-up to 3.3V** |
+| **INA219** | VCC | **ESP32 3.3V** (or 5V) | Power supply |
+| **INA219** | GND | **ESP32 GND** | Common ground |
+| **INA219** | SDA | **ESP32 GPIO 21** | Shared I2C Data bus |
+| **INA219** | SCL | **ESP32 GPIO 22** | Shared I2C Clock bus |
+| **INA219** | VIN+ | **Solar Panel (+)** | Input from panel positive |
+| **INA219** | VIN- | **6V 3W Lamp (+)** | Output to lamp load positive |
+| **OLED 0.96"** | VCC | **ESP32 3.3V** | Power supply |
+| **OLED 0.96"** | GND | **ESP32 GND** | Common ground |
+| **OLED 0.96"** | SDA | **ESP32 GPIO 21** | Shared I2C Data bus |
+| **OLED 0.96"** | SCL | **ESP32 GPIO 22** | Shared I2C Clock bus |
+| **DS18B20** | VDD (Red) | **ESP32 3.3V** | Sensor power |
+| **DS18B20** | GND (Black) | **ESP32 GND** | Common ground |
+| **DS18B20** | DATA (Yellow) | **ESP32 GPIO 4** | 1-Wire Data (**attach 4.7kΩ to 3.3V**) |
+| **DHT22** | VCC (+) | **ESP32 3.3V** | Sensor power |
+| **DHT22** | GND (-) | **ESP32 GND** | Common ground |
+| **DHT22** | DATA (Out) | **ESP32 GPIO 18** | Ambient temp & humidity data |
+| **6V Lamp** | Return (-) | **ESP32 GND & Panel (-)** | Closes the DC load circuit |
+
+---
 
 ### Flashing the ESP32
-1. Install **Arduino IDE** (version 2+).
-2. Add ESP32 board support via the Boards Manager: `esp32 by Espressif Systems`.
-3. Install required libraries via Library Manager:
-   - `Adafruit INA219` by Adafruit
-   - `OneWire` by Paul Stoffregen
-   - `DallasTemperature` by Miles Burton
-4. Open `esp32/solarchip_esp32.ino`.
-5. Update your Wi-Fi credentials:
+
+1. Open **Arduino IDE** (version 2.0+).
+2. Install the ESP32 board definition: `Tools` → `Board` → `Boards Manager` → Search **`esp32 by Espressif`**.
+3. Install required libraries via **`Sketch` → `Include Library` → `Manage Libraries`**:
+   - **`Adafruit INA219`** by Adafruit
+   - **`Adafruit SSD1306`** by Adafruit
+   - **`Adafruit GFX Library`** by Adafruit
+   - **`OneWire`** by Paul Stoffregen
+   - **`DallasTemperature`** by Miles Burton
+   - **`DHT sensor library`** by Adafruit
+4. Open [`esp32/solarchip_esp32.ino`](file:///d:/Development/Projects/solar%20forecast/esp32/solarchip_esp32.ino).
+5. Edit your Wi-Fi credentials:
    ```cpp
-   const char* WIFI_SSID     = "Your_WiFi_Network";
+   const char* WIFI_SSID     = "Your_WiFi_Name";
    const char* WIFI_PASSWORD = "Your_WiFi_Password";
    ```
-6. Update `SERVER_URL` with your computer's local LAN IP:
-   - On Windows, run `ipconfig` in Command Prompt to find your IPv4 Address (e.g., `192.168.1.100`).
-   - On macOS/Linux, run `ip a` or `ifconfig`.
+6. Set `SERVER_URL` to your computer's local IP on the network:
    ```cpp
-   const char* SERVER_URL = "http://192.168.1.100:5000/api/readings";
+   const char* SERVER_URL    = "http://192.168.1.100:5000/api/readings";
    ```
-7. Select your ESP32 board and COM port, then click **Upload**.
-8. Open the Serial Monitor at **115200 baud** to view real-time diagnostic logs.
+7. Select **ESP32 Dev Module** and the correct COM port, then click **Upload**.
+8. Open the Serial Monitor at **115200 baud** to see real-time sensor diagnostics and HTTP transmission statuses.
 
 ---
 
