@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SolarChip — Solar PV Monitoring & Forecast</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <!-- Chart.js for responsive visual charts with fallback handling -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+  <!-- Top Navigation / Header -->
+  <header class="app-header">
+    <div class="header-content">
+      <div class="brand-group">
+        <div class="brand-icon" aria-hidden="true">☀️</div>
+        <div>
+          <div class="brand-badge-row">
+            <span class="eyebrow">IOT + FORECASTING DASHBOARD</span>
+            <span class="badge badge-soft" id="panelRatingBadge">{{ panel_rated_watts }} W Rated Panel</span>
+          </div>
+          <h1 class="brand-title">SolarChip</h1>
+          <p class="brand-subtitle">
+            Location: <strong>{{ location_name }}</strong> ({{ latitude }}°N, {{ longitude }}°E)
+          </p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div id="connectionBadge" class="status-indicator status-waiting" aria-live="polite">
+          <span class="status-dot"></span>
+          <span id="connectionText">Checking connection...</span>
+        </div>
+        <button id="refreshBtn" class="btn btn-secondary" onclick="refreshAll()" title="Refresh telemetry and forecasts">
+          <span class="btn-icon">↻</span> Refresh Now
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- System Status & Alert Banner -->
+    <section id="statusBanner" class="alert-banner alert-info" role="status">
+      <div class="alert-icon" id="statusIcon">ℹ️</div>
+      <div class="alert-body">
+        <div class="alert-title-row">
+          <strong id="statusTitle">Connecting to SolarChip Backend</strong>
+          <span id="statusTag" class="status-tag">Initializing</span>
+        </div>
+        <p id="statusDesc">Fetching latest sensor telemetry and weather forecasts...</p>
+      </div>
+    </section>
+
+    <!-- Key Metrics Grid (6 Summary Cards) -->
+    <section class="metrics-grid" aria-label="Key Solar Performance Metrics">
+      <!-- 1. Current Power -->
+      <article class="metric-card">
+        <div class="card-header">
+          <span class="card-label">Current Power</span>
+          <span class="type-pill pill-measured">Measured</span>
+        </div>
+        <div class="card-body">
+          <div class="card-value-row">
+            <strong id="cardPower" class="card-value">--</strong>
+            <span class="card-unit">W</span>
+          </div>
+          <p class="card-subtext">Instantaneous (V × I)</p>
+        </div>
+      </article>
+
+      <!-- 2. Voltage -->
+      <article class="metric-card">
+        <div class="card-header">
+          <span class="card-label">Panel Voltage</span>
+          <span class="type-pill pill-measured">Measured</span>
+        </div>
+        <div class="card-body">
+          <div class="card-value-row">
+            <strong id="cardVoltage" class="card-value">--</strong>
+            <span class="card-unit">V</span>
+          </div>
+          <p class="card-subtext">Bus voltage (INA219)</p>
+        </div>
+      </article>
+
+      <!-- 3. Current -->
+      <article class="metric-card">
+        <div class="card-header">
+          <span class="card-label">Panel Current</span>
+          <span class="type-pill pill-measured">Measured</span>
+        </div>
+        <div class="card-body">
+          <div class="card-value-row">
+            <strong id="cardCurrent" class="card-value">--</strong>
+            <span class="card-unit">A</span>
+          </div>
+          <p class="card-subtext">Shunt current</p>
+        </div>
+      </article>
+
+      <!-- 4. Panel Temperature -->
+      <article class="metric-card">
+        <div class="card-header">
+          <span class="card-label">Panel Temperature</span>
+          <span class="type-pill pill-measured">Measured</span>
+        </div>
+        <div class="card-body">
+          <div class="card-value-row">
+            <strong id="cardTemp" class="card-value">--</strong>
+            <span class="card-unit">°C</span>
+          </div>
+          <p class="card-subtext">DS18B20 probe</p>
+        </div>
+      </article>
+
+      <!-- 5. Today's Energy Generated -->
+      <article class="metric-card highlight-card">
+        <div class="card-header">
+          <span class="card-label">Today's Generation</span>
+          <span class="type-pill pill-measured">Integrated</span>
+        </div>
+        <div class="card-body">
+          <div class="card-value-row">
+            <strong id="cardEnergyWh" class="card-value">--</strong>
+            <span class="card-unit">Wh</span>
+          </div>
+          <p class="card-subtext" id="cardEnergyKwh">Equivalent to -- kWh today</p>
+        </div>
+      </article>
+
+      <!-- 6. 24h Forecast Energy -->
+      <article class="metric-card">
+        <div class="card-header">
+          <span class="card-label">24h Forecast Energy</span>
+          <span class="type-pill pill-demo">Demo Estimate</span>
+        </div>
+        <div class="card-body">
+          <div class="card-value-row">
+            <strong id="cardForecastKwh" class="card-value">--</strong>
+            <span class="card-unit">kWh</span>
+          </div>
+          <p class="card-subtext" id="cardForecastWh">Total: -- Wh estimated</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- Empty State for Missing Hardware Telemetry -->
+    <section id="emptyState" class="panel empty-panel" style="display:none;">
+      <div class="empty-icon">🔌</div>
+      <h2>No Sensor Telemetry Received Yet</h2>
+      <p class="empty-desc">
+        The SolarChip backend is online and awaiting readings from your ESP32 hardware kit.
+      </p>
+      <div class="instructions-box">
+        <h3>How to send test telemetry without hardware:</h3>
+        <p>Run this command in your terminal to simulate an ESP32 sensor transmission:</p>
+        <pre><code id="curlSample">curl -X POST http://127.0.0.1:5000/api/readings -H "Content-Type: application/json" -d "{\"voltage\": 5.2, \"current\": 0.35, \"panel_temp\": 38.5}"</code></pre>
+        <button class="btn btn-primary" onclick="sendSampleTelemetry()">
+          🚀 Send Sample Reading from Browser
+        </button>
+      </div>
+    </section>
+
+    <!-- Chart Panel: Live Telemetry History -->
+    <section class="panel chart-panel">
+      <div class="panel-header">
+        <div>
+          <div class="title-with-pill">
+            <h2>Live Telemetry History</h2>
+            <span class="type-pill pill-measured">Measured Data</span>
+          </div>
+          <p class="panel-description">Historical power (Watts), voltage (V), and temperature (°C) captured by ESP32</p>
+        </div>
+        <div class="chart-controls">
+          <span class="freshness-text" id="freshnessIndicator">Last reading: awaiting data</span>
+        </div>
+      </div>
+      <div class="chart-container" id="liveChartContainer">
+        <canvas id="liveChart" aria-label="Live Sensor Readings Chart"></canvas>
+        <div id="liveChartFallback" class="chart-fallback" style="display:none;"></div>
+      </div>
+    </section>
+
+    <!-- Chart Panel: 24-Hour Forecast -->
+    <section class="panel chart-panel">
+      <div class="panel-header">
+        <div>
+          <div class="title-with-pill">
+            <h2>24-Hour Solar Energy Generation Forecast</h2>
+            <span class="type-pill pill-demo">Demo Model Estimate</span>
+          </div>
+          <p class="panel-description">
+            Hourly expected power (W) and energy (Wh) based on Open-Meteo solar irradiance, ambient temperature, and cloud cover.
+          </p>
+        </div>
+        <div class="forecast-meta" id="weatherStatusBadge">
+          <span class="badge badge-soft">Weather: Checking...</span>
+        </div>
+      </div>
+      <div class="chart-container" id="forecastChartContainer">
+        <canvas id="forecastChart" aria-label="24-Hour Solar Generation Forecast Chart"></canvas>
+        <div id="forecastChartFallback" class="chart-fallback" style="display:none;"></div>
+      </div>
+      <div class="demo-banner">
+        <span class="demo-tag">DEMO ESTIMATE</span>
+        <span class="demo-text">
+          Forecast outputs are generated by a demonstration Random Forest model trained on synthetic data.
+          They demonstrate application workflows and must not be used for production solar grid decisions.
+        </span>
+      </div>
+    </section>
+
+    <!-- Chart Panel: 12-Month Seasonal Estimates -->
+    <section class="panel chart-panel">
+      <div class="panel-header">
+        <div>
+          <div class="title-with-pill">
+            <h2>12-Month Seasonal Daily Generation Pattern</h2>
+            <span class="type-pill pill-demo">Illustrative Climate Prototype</span>
+          </div>
+          <p class="panel-description">
+            Estimated average daily generation (Wh/day) across the year illustrating monsoon cloud cover attenuation vs summer peaks.
+          </p>
+        </div>
+      </div>
+      <div class="chart-container" id="seasonChartContainer">
+        <canvas id="seasonChart" aria-label="12-Month Seasonal Solar Estimate Chart"></canvas>
+        <div id="seasonChartFallback" class="chart-fallback" style="display:none;"></div>
+      </div>
+      <div class="demo-banner">
+        <span class="demo-tag">ILLUSTRATIVE MODEL</span>
+        <span class="demo-text">
+          This seasonal preview is trained on 12 illustrative regional climate reference points. Replace with multi-year local pyranometer recordings for certified solar feasibility analysis.
+        </span>
+      </div>
+    </section>
+
+    <!-- System Diagnostics & Technical Specs -->
+    <section class="panel diagnostics-panel">
+      <h2>System Diagnostics & Hardware Specifications</h2>
+      <div class="diagnostics-grid">
+        <div class="diag-item">
+          <span class="diag-label">Configured Panel Rating:</span>
+          <strong class="diag-val" id="diagRated">{{ panel_rated_watts }} W (STC)</strong>
+        </div>
+        <div class="diag-item">
+          <span class="diag-label">Performance Deviation:</span>
+          <strong class="diag-val" id="diagDeviation">-- %</strong>
+        </div>
+        <div class="diag-item">
+          <span class="diag-label">Sensor Telemetry Interval:</span>
+          <strong class="diag-val">15 seconds (configurable)</strong>
+        </div>
+        <div class="diag-item">
+          <span class="diag-label">Database Storage:</span>
+          <strong class="diag-val">SQLite (solarchip.db) with WAL mode</strong>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="app-footer">
+    <div class="container footer-content">
+      <p>
+        <strong>SolarChip Student Prototype</strong> · Educational IoT & AI Solar Monitoring Architecture
+      </p>
+      <p class="footer-subtext">
+        Instantaneous Power: <strong>Watts (W)</strong> · Cumulative Energy: <strong>Watt-hours (Wh) / Kilowatt-hours (kWh)</strong> · Voltage: <strong>Volts (V)</strong> · Current: <strong>Amperes (A)</strong>
+      </p>
+    </div>
+  </footer>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
